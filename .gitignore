@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.vscode/
+.pytest_cache/
+*.py[cod]
+build/
+*.egg-info/
+framelab/_cpp*.so
+framelab/_cpp*.pyd
+outputs/*
+!outputs/.gitkeep
+samples/*.mp4
+*.avi
