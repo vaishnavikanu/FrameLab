@@ -1,173 +1,267 @@
-# FrameLab — video enhancement, complexity analysis & content-aware encoding
 
-FrameLab is a small media-engineering project: a **C++17 / pybind11 core** (motion estimation, spatial
-complexity, LUT kernels) driven from **Python** (OpenCV, ffmpeg/x264, VMAF, Streamlit).
+# FrameLab — Video Processing and Quality Analysis
 
-What it does:
+FrameLab is a video-processing project I built using Python and C++. I wanted to explore video enhancement, motion estimation, image complexity analysis, and the trade-off between video quality and compression.
 
-1. **Enhance** video (CLAHE, denoise, sharpen, brightness LUT) and measure what actually changed
-   (blur/noise/brightness before vs. after, PSNR vs. input, enhancement ms/frame, output bitrate). Audio is kept.
-2. **Analyze content complexity** per frame: spatial detail + motion-compensated temporal residual
-   (block-matching motion estimation in C++), plus scene-cut detection.
-3. **Content-aware encoding study:** sweep x264 CRF values, score each encode (**VMAF** when your ffmpeg has it,
-   otherwise SSIM/PSNR), plot the rate–distortion curve, and recommend the cheapest CRF that meets a quality target.
-4. **Benchmark** native C++ against NumPy/OpenCV/pure-Python references, with bit-exactness checks.
+The project combines a Python processing pipeline with a C++17 extension using pybind11. I also built a Streamlit dashboard to run experiments and view results.
 
-> Scope: this is a learning/portfolio project, **not** a codec. The motion estimator is classic block matching
-> (SAD, full + diamond search) to study the idea; blur/noise values are heuristics, not perceptual quality.
+## Features
 
----
+- **Video Enhancement:** Apply CLAHE, denoising, sharpening, brightness adjustment, and combined enhancement methods.
+- **Complexity Analysis:** Measure spatial detail, motion-compensated temporal residuals, and possible scene changes.
+- **Content-Aware Encoding Study:** Sweep x264 CRF values, compare video quality, generate rate-distortion curves, and recommend a CRF that meets a quality target.
+- **C++ Optimization:** Implement image-processing kernels and block-matching motion estimation, then benchmark them against Python and OpenCV implementations.
+- **Interactive Dashboard:** Explore video enhancement, complexity analysis, encoding sweeps, and benchmarks through Streamlit.
+- **Automated Testing:** Use pytest to test core functionality and compare native implementations against reference implementations.
 
-## 1. Quick start (works without any C++ compiler)
+> **Note:** FrameLab is an experimental video-processing toolkit, not a video codec. Complexity scores and noise/blur measurements are heuristic indicators rather than calibrated measures of perceptual quality.
 
-Python 3.10+ (tested on 3.12). From the `FrameLab` folder:
+## Tech Stack
+
+- **Languages:** Python, C++17
+- **Libraries:** OpenCV, NumPy, pybind11
+- **Video Processing:** FFmpeg, x264, VMAF
+- **Dashboard:** Streamlit
+- **Testing:** pytest
+
+## Project Structure
+
+```text
+FrameLab/
+├── app/
+│   └── dashboard.py
+├── cpp/
+│   ├── image_ops.cpp
+│   └── CMakeLists.txt
+├── framelab/
+│   ├── analysis.py
+│   ├── benchmarks.py
+│   ├── cli.py
+│   ├── complexity.py
+│   ├── enhancement.py
+│   ├── ffmpeg_tools.py
+│   ├── kernels.py
+│   ├── metrics.py
+│   ├── pipeline.py
+│   ├── sweep.py
+│   └── video_io.py
+├── scripts/
+│   ├── make_sample_video.py
+│   └── run_demo.py
+├── tests/
+├── requirements.txt
+├── setup.py
+└── README.md
+```
+
+## Getting Started
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/vaishnavikanu/FrameLab.git
+cd FrameLab
+```
+
+### 2. Create a Virtual Environment
 
 **Windows (PowerShell)**
+
 ```powershell
 py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1          # if blocked: Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-python scripts/run_demo.py            # generates a sample video and runs everything (~1 min)
-streamlit run app/dashboard.py        # the web UI
 ```
 
 **Linux / macOS**
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
+```
+
+### 3. Build the C++ Extension (Optional)
+
+The project supports Python fallbacks when the native extension is unavailable. Building the extension enables the C++ implementations.
+
+A C++17 compiler is required.
+
+```bash
+python setup.py build_ext --inplace --force
+python -m framelab.cli info
+```
+
+Check the output for `native_module: true` to confirm that the extension loaded successfully.
+
+### 4. Run the Demo
+
+```bash
 python scripts/run_demo.py
-streamlit run app/dashboard.py
 ```
 
-`requirements.txt` includes `imageio-ffmpeg`, which ships an ffmpeg binary with x264, so you do **not** need to
-install ffmpeg yourself. If you already have ffmpeg on your PATH it is used instead; point `FFMPEG_BINARY` at a
-specific build to override. Run `python -m framelab.cli info` to see what was detected.
-
-Without the C++ module everything still works through pure-Python fallbacks (slower motion estimation).
-
-## 2. Build the C++ core (recommended — this is the interesting part)
+### 5. Launch the Dashboard
 
 ```bash
-python setup.py build_ext --inplace
-python -m framelab.cli info            # should print  "native_module": true
+python -m streamlit run app/dashboard.py
 ```
 
-This produces `framelab/_cpp*.so` (or `.pyd` on Windows) and is picked up automatically.
-You need a C++17 compiler: **Windows** → "Build Tools for Visual Studio" (Desktop development with C++),
-**Linux** → `sudo apt install build-essential python3-dev`, **macOS** → `xcode-select --install`.
+## Command-Line Usage
 
-CMake alternative (writes the module into `framelab/` too):
-```bash
-cmake -S cpp -B cpp/build -Dpybind11_DIR=$(python -m pybind11 --cmakedir)
-cmake --build cpp/build --config Release
-```
-
-## 3. Command line
+Display environment and dependency information:
 
 ```bash
 python -m framelab.cli info
-python scripts/make_sample_video.py                      # samples/sample.mp4 (synthetic, 2 scenes, with audio)
-
-python -m framelab.cli process  samples/sample.mp4 --method clahe --output outputs/clahe.mp4
-python -m framelab.cli complexity samples/sample.mp4
-python -m framelab.cli sweep    samples/sample.mp4 --max-frames 150          # CRF sweep + RD curve
-python -m framelab.cli compare  reference.mp4 processed.mp4                  # PSNR / SSIM
-python -m framelab.cli kernel-benchmark
-python -m framelab.cli motion-benchmark --include-python-full
 ```
 
-Methods: `identity`, `clahe`, `denoise`, `sharpen`, `brightness` (uses the native LUT kernel), `combined`.
-`process` flags: `--crf` (output x264 quality), `--backend auto|ffmpeg|opencv`, `--no-analyze` (faster).
-Audio is kept when the whole video is processed through ffmpeg (not with `--max-frames` or `--backend opencv`).
+Generate a synthetic sample video:
 
-`sweep` metric: `auto` picks VMAF if your ffmpeg has libvmaf (the bundled Linux build did when I tested; on other platforms check `python -m framelab.cli info`), else SSIM.
-Defaults for the quality target are VMAF 93, SSIM 0.95, PSNR 38 dB; override with `--target`.
+```bash
+python scripts/make_sample_video.py
+```
 
-## 4. Tests
+Enhance a video using CLAHE:
+
+```bash
+python -m framelab.cli process samples/sample.mp4 --method clahe --output outputs/clahe.mp4
+```
+
+Analyze video complexity:
+
+```bash
+python -m framelab.cli complexity samples/sample.mp4
+```
+
+Run a CRF sweep and generate a rate-distortion curve:
+
+```bash
+python -m framelab.cli sweep samples/sample.mp4 --max-frames 150
+```
+
+Compare a reference video with a processed video:
+
+```bash
+python -m framelab.cli compare reference.mp4 processed.mp4
+```
+
+Run the kernel and motion-estimation benchmarks:
+
+```bash
+python -m framelab.cli kernel-benchmark
+python -m framelab.cli motion-benchmark
+```
+
+Available enhancement methods include `identity`, `clahe`, `denoise`, `sharpen`, `brightness`, and `combined`.
+
+Audio preservation depends on the processing backend and options. Check the command output for the behavior of each run.
+
+## Implementation Overview
+
+### 1. Video Enhancement
+
+The pipeline decodes video frames, applies the selected enhancement method, analyzes the output, and encodes the processed video. It reports enhancement timing separately from end-to-end processing speed.
+
+### 2. Native C++ Kernels
+
+I used pybind11 to connect the C++ implementation to Python. The native code includes:
+
+- Brightness and contrast adjustment using a lookup table (LUT).
+- Gradient-energy calculation for image-detail analysis.
+- Block-matching motion estimation using the sum of absolute differences (SAD).
+- Full-search and diamond-search motion estimation.
+
+The native implementations are benchmarked against Python and OpenCV alternatives to compare performance and verify correctness.
+
+### 3. Complexity Analysis
+
+The complexity analysis combines spatial image detail with a motion-compensated temporal residual. A residual-based heuristic is also used to identify possible scene cuts.
+
+The resulting complexity index is an explainable indicator for experimentation, not a trained predictor of video complexity.
+
+### 4. Rate-Distortion Analysis
+
+The CRF sweep encodes a video at different x264 quality settings and measures the resulting bitrate and quality. It plots the rate-distortion curve and selects the highest CRF that satisfies the configured quality target.
+
+The quality metric depends on the available FFmpeg build. VMAF is used when supported; otherwise, the configured fallback metric is used.
+
+## Benchmark Results
+
+The following measurements were obtained in my Windows environment. Results depend on the machine, compiler, input, and configuration.
+
+### Brightness/Contrast Kernel
+
+**Input:** 1920 × 1080 × 3 image, 20 repetitions.
+
+| Implementation | Average Time per Call |
+|---|---:|
+| NumPy float32 | 41.86 ms |
+| OpenCV LUT | 1.18 ms |
+| C++ LUT | 1.95 ms |
+
+All three implementations produced bit-identical outputs in this benchmark. OpenCV was the fastest in this particular run.
+
+### Motion Estimation
+
+**Input:** 640 × 360, 16 × 16 blocks, search range of ±16 pixels.
+
+| Implementation | Time per Frame Pair |
+|---|---:|
+| Python diamond search | 99.07 ms |
+| C++ diamond search | 3.53 ms |
+| C++ full search | 110.33 ms |
+
+The C++ diamond-search implementation was approximately **28× faster** than the Python diamond-search implementation in this run. The Python and C++ diamond-search implementations produced matching results in the benchmark.
+
+Diamond search evaluates fewer candidate positions than full search, reducing computation but potentially selecting different motion vectors.
+
+### CRF Sweep
+
+On the bundled synthetic sample, using 150 frames and a VMAF target of 93, the sweep recommended **CRF 26**.
+
+The resulting bitrate was approximately **75.5% lower than CRF 18** while meeting the configured VMAF target in this experiment.
+
+This result is specific to the tested sample and settings. Other videos may produce different recommendations.
+
+### Video Enhancement
+
+In a CLAHE processing run on the sample video:
+
+- Mean enhancement time: approximately 2.77 ms per frame.
+- End-to-end processing speed: approximately 50 FPS.
+- Audio preservation: reported as successful for the tested FFmpeg pipeline.
+
+Enhancement time and end-to-end FPS measure different parts of the pipeline.
+
+## Tests
+
+Run the test suite using:
 
 ```bash
 python -m pytest
 ```
-153 test cases: native-vs-Python equivalence, motion recovery of a planted shift, LUT bit-exactness, scene-cut detection,
-audio preservation, odd-size videos, CRF-sweep monotonicity, VMAF sanity, CLI error paths. Tests that need an
-unavailable component (native build, libvmaf, scikit-image) are **skipped with a reason**, never silently passed.
 
-## 5. Measured results
+The latest recorded test run completed with **152 passed and 1 skipped**.
 
-Measured once in a Linux sandbox (x86-64, single thread, synthetic data). **Your numbers will differ — rerun
-`python scripts/run_demo.py`.** Treat these as examples of what the benchmarks report, not as claims.
+The tests cover the processing pipeline, enhancement methods, native kernels, complexity analysis, CLI behavior, and encoding-sweep functionality.
 
-**Brightness/contrast kernel, 1920×1080×3** (all three outputs are bit-identical)
+## Limitations
 
-| Implementation | ms / call | vs NumPy |
-|---|---|---|
-| NumPy float32 | 10.3 | 1× |
-| OpenCV `cv2.LUT` | 2.7 | 3.9× |
-| C++ 256-entry LUT (unrolled) | 2.4 | 4.3× |
+- Motion estimation uses integer-pixel block matching and a single reference frame.
+- Complexity analysis and scene-cut detection rely on heuristics that have not been calibrated against a large dataset.
+- The default CRF sweep evaluates a limited frame excerpt rather than optimizing every scene independently.
+- The bundled sample video is synthetic, so results may differ on real-world footage.
+- Performance depends on hardware, compiler, input resolution, and installed FFmpeg capabilities.
 
-The C++ LUT is on par with OpenCV's already-optimised LUT: for this simple per-pixel op there is little left to win.
+## Future Improvements
 
-**Motion estimation, 640×360, 16×16 blocks, ±16 px** (Python and C++ return *identical* vectors)
+- Evaluate the pipeline on a larger collection of real-world videos.
+- Predict CRF settings from measured video-complexity features.
+- Add sub-pixel motion estimation and variable block sizes.
+- Explore SIMD and multithreaded C++ optimizations.
+- Extend encoding analysis to multiple resolutions and bitrate ladders.
 
-| Implementation | ms / frame pair | mean SAD / block |
-|---|---|---|
-| Python diamond | 109 | 39.2 |
-| **C++ diamond** | **6.0** (18× faster) | 39.2 |
-| Python full search | 4412 | 37.5 |
-| C++ full search | 207 (21× faster) | 37.5 |
+## What I Learned
 
-Diamond search is ~35× faster than full search here, at a cost of ~4.6 % higher residual SAD (the classic speed/quality trade-off).
-
-**Enhancement cost at 1280×720** (ms per frame, single thread)
-
-| identity | brightness | sharpen | CLAHE | denoise (NLM) | combined |
-|---|---|---|---|---|---|
-| 0.3 | 1.1 | 7.6 | 17.3 | 1932 | 1772 |
-
-Non-local-means denoising is ~0.5 fps at 720p, i.e. **not real-time**; the dashboard shows a real-time flag per run.
-
-**CRF sweep on the bundled synthetic sample (150 frames, VMAF target 93):** recommended **CRF 26**, ~76 % lower
-bitrate than CRF 18. With SSIM (luma-only, more lenient) the same target logic picks CRF 30 — the choice of metric
-changes the answer, which is exactly why the tool reports several.
-
-## 6. How it works
-
-- **`cpp/image_ops.cpp`** — `adjust_brightness_contrast` (LUT built in float32 with FMA contraction prevented, so it is bit-exact with
-  the NumPy reference), `motion_estimate` (SAD block matching; full search or large/small-diamond search; GIL released),
-  `gradient_energy`. Tie-breaking is "strictly lower SAD wins, starting from the zero vector" so Python and C++ agree exactly.
-- **`framelab/kernels.py`** — native fast path + `*_python` reference for each kernel.
-- **`framelab/complexity.py`** — per frame: spatial = mean |∇| of the downscaled luma; temporal = mean per-pixel SAD after motion
-  compensation; scene cut = residual spike above `max(cut_min, cut_ratio × median)`. `complexity_index = spatial + temporal`
-  is an explainable proxy in 8-bit intensity units, **not** a calibrated predictor.
-- **`framelab/sweep.py`** — encode with x264 at each CRF, measure bitrate and quality against the source, pick the highest
-  CRF whose quality ≥ target.
-- **`framelab/ffmpeg_tools.py`** — ffmpeg discovery, raw-frame piping to x264 with audio muxing, VMAF via `libvmaf`.
-- **`framelab/pipeline.py`** — decode → enhance → analyze → encode, with enhancement timing reported separately from end-to-end FPS.
-
-```
-FrameLab/
-├── app/dashboard.py          Streamlit UI (Enhance · Complexity · Encoding sweep · Benchmarks)
-├── cpp/                      C++17 core (image_ops.cpp) + CMakeLists.txt
-├── framelab/                 Python package (kernels, complexity, sweep, pipeline, ffmpeg tools, CLI)
-├── scripts/                  make_sample_video.py · run_demo.py
-├── tests/                    pytest suite
-├── samples/ outputs/         sample video (generated) · results
-├── setup.py  requirements.txt
-```
-
-## 7. Known limitations (honest list)
-
-- Block matching is integer-pel and single reference; real encoders use sub-pel, multiple references and variable block sizes.
-- The complexity index and scene-cut detector are heuristics; the threshold adapts to each video but is not tuned on a dataset.
-- CRF sweep quality is measured on a (default) 150-frame excerpt; per-scene or per-title ladders are future work.
-- SSIM here is luma-only; PSNR/SSIM decode through OpenCV, VMAF through ffmpeg.
-- Tested on Linux only. Windows/macOS paths use standard `subprocess`/`pathlib`, but I could not run them here — please report anything odd.
-- The sample video is synthetic; results on real footage will differ (that is the point of running your own clips).
-
-## 8. Ideas to extend it
-
-1. Run `sweep` + `complexity` over 20+ clips and fit/validate a model that predicts the CRF needed for a VMAF target from the complexity features.
-2. ROI-based encoding: detect faces/people and feed it to x264 as regions of interest (ffmpeg's `addroi` filter) — measure bitrate at equal perceived quality.
-3. Sub-pel and variable block-size motion estimation, or SIMD/OpenMP in the C++ kernels with before/after benchmarks.
-4. Multi-resolution (bitrate ladder) sweep with a BD-rate summary.
+Through this project, I explored Python and C++ integration, native-code benchmarking, video-quality metrics, motion estimation, rate-distortion analysis, and automated testing. I also gained experience building a command-line interface and a dashboard around a reusable processing pipeline.
